@@ -579,13 +579,10 @@ $('share-group').onclick=async()=>{
   url.hash=current.id.slice(0,8);
   const heading=current.title.includes('團購')?current.title:current.title+'團購';
   const text=heading+'\n'+url.href;
-  if(navigator.share){
-    try {await navigator.share({text});return;}
-    catch(error){if(error.name==='AbortError' || token!==generation)return;}
-  }
+  // Copy straight away instead of opening the system share sheet.
   try {
     await navigator.clipboard.writeText(text);
-    if(token===generation)notice('已複製這一團的連結，可以貼到 LINE');
+    if(token===generation)notice('已複製團名和連結，可以貼到 LINE');
   } catch {
     if(token!==generation)return;
     const field=$('share-fallback');
