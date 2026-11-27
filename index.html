@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>團購接龍</title><link rel="icon" href="./favicon.svg"><link rel="stylesheet" href="./group-buy.css"><script type="module" src="./group-buy.js?v=paste1"></script></head>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>團購接龍</title><link rel="icon" href="./favicon.svg"><link rel="stylesheet" href="./group-buy.css?v=edit1"><script type="module" src="./group-buy.js?v=edit1"></script></head>
 <body><main><header><a id="home" href="#">團購接龍</a><a id="new" class="button" href="#new">開新團</a></header><p id="message" role="status" hidden></p>
 <section id="list"><h1>目前的團購</h1><div id="cards">載入中…</div></section>
-<section id="create" hidden><a href="#">‹ 全部團購</a><h1>開新團</h1><form id="create-form">
+<section id="create" hidden><a id="form-back" href="#">‹ 全部團購</a><h1 id="group-heading">開新團</h1><form id="create-form">
 <label>團購名稱<input name="title" required maxlength="160" placeholder="例如：黃色小蕃茄（小農）訂購"></label>
 <label>團購備註<textarea name="notes" maxlength="3000" rows="3" placeholder="送達日期、收單時間、規格或取貨方式"></textarea></label>
 <fieldset><legend>預設品項（選填）</legend><div id="products"></div><button type="button" id="add">新增品項</button></fieldset>
 <label>上傳菜單（選填）<input type="file" name="menu" accept="image/jpeg,image/png,image/webp,application/pdf"><small>JPG、PNG、WebP 或 PDF，最多 8 MB</small></label>
-<button class="primary">開始收單</button></form></section>
-<section id="detail" hidden><a href="#">‹ 全部團購</a><h1 id="title"></h1><p id="notes"></p><a id="menu" target="_blank" rel="noopener" hidden>查看菜單 ↗</a>
+<label id="remove-menu-label" hidden><span><input type="checkbox" name="removeMenu"> 移除現有菜單</span></label><small id="price-note" hidden>更改單價後，依品項填寫的接龍會按新單價計算。</small><button id="save-group" class="primary">開始收單</button></form></section>
+<section id="detail" hidden><a href="#">‹ 全部團購</a><div class="bar"><h1 id="title"></h1><a id="edit-group" data-edit>編輯團購</a></div><a id="entry-back" hidden>取消修改</a><p id="notes"></p><a id="menu" target="_blank" rel="noopener" hidden>查看菜單 ↗</a>
 <div class="cols"><div><form id="paste-form"><h2>整段貼上訂單</h2><label>訂單內容<textarea id="paste" rows="6" maxlength="25000" required placeholder="姓名&#10;411 XO小卷醬 NT$ 320&#10;總金額 NT$ 320"></textarea></label><output id="preview" aria-live="polite"></output><button id="send-paste" class="primary" disabled>確認加入接龍</button></form><form id="join"><h2>依品項填數量</h2><label>姓名<input name="name" maxlength="40" required autocomplete="name"></label><div id="choices"></div><div class="total">本次金額 <strong id="subtotal">0 元</strong></div><button class="primary">加入接龍</button></form></div>
-<article><div class="bar"><h2>團購接龍</h2><button id="copy">複製接龍</button></div><p id="stats"></p><pre id="chain"></pre></article></div></section></main></body></html>
+<article id="results"><div class="bar"><h2>團購接龍</h2><button id="copy">複製接龍</button></div><p id="stats"></p><div id="chain"></div></article></div></section></main></body></html>
