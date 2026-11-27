@@ -1,7 +1,9 @@
 const amountFormat = new Intl.NumberFormat('zh-TW');
 const amount = String.raw`(\d{1,3}(?:,\d{3})+|\d+)`;
-// Accepts "NT$ 320", "$320", "＄320", "320元", "320 元", with an optional "*2" / "x2" / "×2" unit multiplier.
-const priced = new RegExp(String.raw`^(.*?)\s*(?:(?:NT\s*)?[$＄]\s*${amount}\s*(?:元)?|${amount}\s*元)\s*(?:[*＊xX×]\s*(\d{1,3}))?$`, 'i');
+// Accepts "NT$ 320", "$320", "＄320", "320元", "320 元", with an optional "*2" / "x2" / "×2" / "+2" unit multiplier.
+const priced = new RegExp(String.raw`^(.*?)\s*(?:(?:NT\s*)?[$＄]\s*${amount}\s*(?:元)?|${amount}\s*元)\s*(?:[*＊xX×+＋]\s*(\d{1,3}))?$`, 'i');
+// Total line: "總金額 NT$ 1,400", "合計 1400", "=1,400", "總金額＝1400元".
+const totalLine = new RegExp(String.raw`^(?:(?:總金額|合計|總計|共)\s*[=＝:：]?|[=＝])\s*(?:NT\s*)?[$＄]?\s*${amount}\s*(?:元)?$`, 'i');
 const quantitySuffix = /[+＋]\s*[0-9０-９]+\s*$/u;
 export function parseOrder(text) {
   let lines = text.split(/\r?\n/).map(line => line.trim().replace(/\\+$/, '').trim()).filter(Boolean);
@@ -13,9 +15,15 @@ export function parseOrder(text) {
   let stated, total = 0;
   const items = [];
   for (const [index,line] of lines.entries()) {
+    const totalMatch = line.match(totalLine);
+    if (totalMatch) {
+      if (stated !== undefined || index !== lines.length-1) throw Error('總金額請放在最後一行');
+      stated = Number(totalMatch[1].replaceAll(',', ''));
+      continue;
+    }
     const match = line.match(priced);
     const label = match?.[1].trim().replace(/\s*[:：=＝-]$/u, '').trim();
-    if (!match || !label) throw Error('第 '+(index+2)+' 行無法辨識，請確認品名與金額，例如「411 XO小卷醬 NT$ 320」或「XO小卷醬 320元」');
+    if (!match || !label) throw Error('第 '+(index+2)+' 行無法辨識，請確認品名與金額，例如「411 XO小卷醬 NT$ 320」或「蜜汁魷魚片 540元*2」');
     const unit = Number((match[2] ?? match[3]).replaceAll(',', ''));
     const times = match[4] === undefined ? 1 : Number(match[4]);
     if (!times) throw Error('第 '+(index+2)+' 行的數量不可為 0');

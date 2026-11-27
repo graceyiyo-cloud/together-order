@@ -423,7 +423,7 @@ async function route() {
   $('new').hidden=hash==='new';$('edit-group').hidden=false;$('results').hidden=false;
   $('entry-back').hidden=true;$('entry-manage').hidden=true;$('paste-form').hidden=false;$('detail').classList.remove('editing');
   $('join').querySelector('h2').textContent='依品項填數量';
-  $('paste-form').querySelector('h2').textContent='整段貼上訂單';
+  $('paste-form').querySelector('h2').hidden=true;
   $('send-paste').textContent='送出接龍';$('submit-quantity').textContent='送出接龍';
   window.scrollTo(0,0);
   if(hash==='new'){groupForm(null);return;}
@@ -453,7 +453,7 @@ async function route() {
       $('results').hidden=true;$('edit-group').hidden=true;
       $('paste-form').hidden=!entry.pasted;$('join').hidden=!!entry.pasted;
       if(entry.pasted){
-        $('paste-form').querySelector('h2').textContent='修改接龍';
+        Object.assign($('paste-form').querySelector('h2'),{textContent:'修改接龍',hidden:false});
         $('paste').value=formatOrder(entry.pasted);previewPaste();$('send-paste').textContent='儲存修改';
       }else{
         $('join').querySelector('h2').textContent='修改接龍';$('join').elements.name.value=entry.name;
@@ -530,7 +530,7 @@ $('paste-form').onsubmit=async event=>{
   if($('send-paste').disabled)return;
   input.readOnly=true; $('send-paste').disabled=true;
   try {
-    await request(api,{method:editingEntry?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:editingEntry?.id ?? pasteId,revision:editingEntry?.revision,group:current.id,text:input.value})});
+    await request(api,{method:editingEntry?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:editingEntry?.id ?? pasteId,revision:editingEntry?.revision,group:current.id,text:formatOrder(parseOrder(input.value))})});
     if(token!==generation)return;
     if(editingEntry){leaveEditor();return;}
     pasteId=crypto.randomUUID(); input.value=''; notice('已加入接龍'); await refresh();
