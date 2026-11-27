@@ -87,6 +87,47 @@ async function request(url, options) {
   if (!response.ok) throw Error((await response.json().catch(()=>({}))).error || '連線失敗，請重試');
   return response.json();
 }
+function linkedNote(text) {
+  const fragment = document.createDocumentFragment();
+  const urls = /(?:https?:\/\/|www\.)[^\s<>"‘’“”「」『』《》【】，。！？；、（）]+/giu;
+  let offset = 0;
+  for (const match of text.matchAll(urls)) {
+    let label = match[0].replace(/[.,;:!?]+$/u,'');
+    // Keep balanced parentheses in a URL, e.g. a Wikipedia article title.
+    for (const [open,close] of [['(',')'],['[',']']]) {
+      while (label.endsWith(close) && label.split(close).length > label.split(open).length) {
+        label = label.slice(0,-1);
+      }
+    }
+    let url;
+    try { url = new URL(/^www\./i.test(label) ? 'https://'+label : label); }
+    catch { continue; }
+    fragment.append(text.slice(offset,match.index));
+    const link = node('a',label);
+    link.href = url.href;
+    link.className = 'note-link';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    fragment.append(link);
+    offset = match.index + label.length;
+  }
+  fragment.append(text.slice(offset));
+  return fragment;
+}
+
+function cardNotes(notes) {
+  const [firstLine,...rest] = notes.split(/\r?\n/);
+  const preview = node('p','');
+  preview.append(linkedNote(firstLine));
+  const seen = new Set([...preview.querySelectorAll('a')].map(link=>link.href));
+  for (const link of linkedNote(rest.join('\n')).querySelectorAll('a')) {
+    if (seen.has(link.href)) continue;
+    seen.add(link.href);
+    if (preview.textContent) preview.append('\n');
+    preview.append(link);
+  }
+  return preview;
+}
 function field(label, attributes) {
   const wrapper=node('label',label);
   const input=Object.assign(document.createElement('input'),attributes);
@@ -180,7 +221,7 @@ function showGroup(group,first) {
   $('restart-round').textContent=group.nextId?'前往下一輪':'重新開團';
   $('restart-round').href=group.nextId?'#'+group.nextId:'#'+group.id+'/restart';
   $('title').textContent=group.title;
-  $('notes').textContent=group.notes;
+  if ($('notes').textContent!==group.notes) $('notes').replaceChildren(linkedNote(group.notes));
   setMenu(group.menu ? api+'?id='+group.id+'&menu=1&v='+group.revision : '');
   $('edit-group').href='#'+group.id+'/edit';
   if(first) {
@@ -229,11 +270,13 @@ async function refresh(first=false) {
       if(snapshot===listSnapshot)return;
       listSnapshot=snapshot;
       $('cards').replaceChildren(...groups.map(g=>{
-        const card=node('a','');card.href='#'+g.id;card.className='card';
+        const card=node('div','');card.className='card';
+        const titleLink=node('a','');titleLink.className='card-title';titleLink.href='#'+g.id;
+        titleLink.append(node('strong',g.title));
         const info=node('div','');info.className='round-info';info.append(...roundInfo(g));
-        card.append(node('strong',g.title),info);
+        card.append(titleLink,info);
         if(history)card.append(node('small','歸檔 '+dateLabel(g.archivedAt)));
-        if(g.notes)card.append(node('p',g.notes.split('\n')[0]));
+        if(g.notes)card.append(cardNotes(g.notes));
         return card;
       }));
       if(!groups.length)$('cards').textContent=history?'目前沒有已歸檔的團購。':'還沒有團購，從「開新團」開始。';
