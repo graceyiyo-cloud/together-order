@@ -582,7 +582,12 @@ $('share-group').onclick=async()=>{
   // Copy straight away instead of opening the system share sheet.
   try {
     await navigator.clipboard.writeText(text);
-    if(token===generation)notice('已複製團名和連結，可以貼到 LINE');
+    if(token!==generation)return;
+    // Confirm on the button itself; a separate message line is easy to miss.
+    const button=$('share-group');
+    clearTimeout(button.resetTimer);
+    button.textContent='已複製';button.classList.add('copied');
+    button.resetTimer=setTimeout(()=>{button.textContent='分享團購';button.classList.remove('copied');},2000);
   } catch {
     if(token!==generation)return;
     const field=$('share-fallback');
