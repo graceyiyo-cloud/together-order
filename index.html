@@ -1,7 +1,7 @@
 <!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>團購接龍</title><link rel="icon" href="./favicon.svg"><link rel="stylesheet" href="./group-buy.css?v=round-tools1"><script type="module" src="./group-buy.js?v=round-tools1"></script></head>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>團購接龍</title><link rel="icon" href="./favicon.svg"><link rel="stylesheet" href="./group-buy.css?v=entry-tools1"><script type="module" src="./group-buy.js?v=entry-tools1"></script></head>
 <body><main><header><a id="home" href="#"><span class="brand-stamp" aria-hidden="true"></span>團購接龍</a><a id="new" class="button" href="#new">開新團</a></header><p id="message" role="status" hidden></p>
-<section id="list"><div class="list-heading"><h1 id="list-title">目前的團購</h1><nav class="tabs" aria-label="團購清單"><a id="active-tab" href="#">目前團購</a><a id="history-tab" href="#history">歷史清單</a><a id="trash-tab" href="#trash">回收清單</a></nav></div><div id="cards">載入中…</div></section>
+<section id="list"><div class="list-heading"><h1 id="list-title">目前的團購</h1><nav class="tabs" aria-label="團購清單"><a id="active-tab" href="#">目前團購</a><a id="history-tab" href="#history">歷史清單</a><a id="trash-tab" href="#trash">回收清單</a></nav></div><div id="cards">載入中…</div><div class="list-foot"><button type="button" id="backup">下載備份</button></div></section>
 <section id="unavailable" hidden><h1 id="missing-title"></h1><div class="manage"><a class="button" href="#">全部團購</a><a class="button" id="missing-trash" href="#trash">回收清單</a></div></section>
 <section id="create" hidden><a id="form-back" href="#">全部團購</a><h1 id="group-heading">開新團</h1><form id="create-form">
 <label>團購名稱<input name="title" required maxlength="160" placeholder="例如：黃色小蕃茄（小農）訂購"></label>
@@ -9,7 +9,7 @@
 <fieldset><legend>預設品項（選填）</legend><div id="products"></div><button type="button" id="add">新增品項</button></fieldset>
 <label>上傳菜單（選填）<input type="file" name="menu" accept="image/jpeg,image/png,image/webp,application/pdf"><small>JPG、PNG、WebP 或 PDF，最多 8 MB</small></label>
 <label id="remove-menu-label" hidden><span><input type="checkbox" name="removeMenu"> 移除現有菜單</span></label><small id="price-note" hidden>更改單價後，依品項填寫的接龍會按新單價計算。</small><button id="save-group" class="primary">開始收單</button></form></section>
-<section id="restart-page" hidden><a id="restart-back">返回團購</a><h1>重新開團</h1><form id="restart-form"><strong id="restart-title"></strong><p>沿用團名、備註、品項和菜單。上一輪接龍會保存在歷史清單，新一輪從空白開始。</p><fieldset class="deadline-picker"><legend>新一輪截止日期與時間（台灣）</legend></fieldset><button class="primary">開始新一輪</button></form></section>
+<section id="restart-page" hidden><a id="restart-back">返回團購</a><h1 id="restart-heading">重新開團</h1><form id="restart-form"><strong id="restart-title"></strong><p id="restart-text"></p><fieldset class="deadline-picker"><legend id="restart-legend"></legend></fieldset><button class="primary" id="restart-submit">開始新一輪</button></form></section>
 <section id="detail" hidden><div class="detail-nav"><a id="detail-back" href="#">全部團購</a><div class="detail-actions"><button id="share-group" type="button">分享團購</button><a id="edit-group" data-edit>編輯團購</a><a id="entry-back" hidden>取消修改</a></div></div>
 <label id="share-fallback" hidden>複製團購連結<input type="url" readonly></label><div class="order-header"><h1 id="title"></h1><div id="round-status" class="round-info"></div>
 <dl class="group-note" id="detail-note" hidden><dt>團購備註</dt><dd id="notes"></dd></dl></div><div class="menu-tools"><section id="menu" hidden>
@@ -22,4 +22,4 @@
 <p class="receipt-title" id="receipt-title"></p>
 <table aria-label="品項整理"><colgroup><col><col class="amount-col"><col class="quantity-col"></colgroup><thead><tr><th scope="col">品項</th><th scope="col">小計</th><th scope="col">數量</th></tr></thead><tbody id="receipt-lines"></tbody></table>
 <div class="receipt-total"><span>合計</span><strong id="receipt-total"></strong></div>
-</div><div class="copy-row"><button id="copy" type="button">複製接龍</button></div></article></div><div id="manage" class="manage"><button type="button" id="close-round">立即截單</button><button type="button" id="archive-round">移至歷史清單</button><a class="button" id="restart-round">重新開團</a><button type="button" id="delete-group">刪除團購</button></div></section></main></body></html>
+</div><div class="copy-row"><button id="export-csv" type="button">匯出 CSV</button><button id="copy" type="button">複製接龍</button></div></article></div><div id="entry-manage" class="manage" hidden><button type="button" id="delete-entry">刪除這筆接龍</button></div><div id="manage" class="manage"><button type="button" id="close-round">立即截單</button><a class="button" id="reopen-round">重新開放收單</a><button type="button" id="archive-round">移至歷史清單</button><a class="button" id="restart-round">重新開團</a><button type="button" id="delete-group">刪除團購</button></div></section></main></body></html>

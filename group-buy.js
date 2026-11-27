@@ -27,7 +27,14 @@ function initPicker(box) {
     for(let i=0;i<count;i++){const value=String(i).padStart(2,'0');select.add(new Option(value,value));}
     row.append(select,node('span',label));
   }
-  date.oninput=()=>{row.querySelectorAll('select').forEach(el=>el.disabled=!date.value);};
+  const clear=node('button','清除');
+  clear.type='button';clear.className='clear-date';clear.hidden=true;clear.setAttribute('aria-label','清除截止時間');
+  clear.onclick=()=>{date.value='';date.oninput();};
+  row.append(clear);
+  date.oninput=()=>{
+    row.querySelectorAll('select').forEach(el=>el.disabled=!date.value);
+    clear.hidden=!date.value;
+  };
   box.append(row);
 }
 document.querySelectorAll('.deadline-picker').forEach(initPicker);
@@ -152,10 +159,57 @@ function addProduct(item,slot) {
   $('products').append(row);
 }
 $('add').onclick=()=>{if($('products').children.length<60)addProduct();};
-function entryText(group,e) {
-  if(e.pasted)return formatOrder(e.pasted);
-  const total=e.quantities.reduce((sum,q,i)=>sum+q*group.items[i].price,0);
-  return [e.name+' '+total+'元',...group.items.flatMap((item,i)=>e.quantities[i]?[item.name+' +'+e.quantities[i]]:[])].join('\n');
+// Both kinds of entry share the pasted format, so a copied chain can be pasted back in.
+function entryOrder(group,e) {
+  if(e.pasted)return e.pasted;
+  const items=group.items.flatMap((item,i)=>{
+    const q=e.quantities[i];
+    return q?[{name:item.name+(q>1?'+'+q:''),price:q*item.price}]:[];
+  });
+  return {name:e.name,items,total:items.reduce((sum,item)=>sum+item.price,0)};
+}
+const entryText=(group,e)=>formatOrder(entryOrder(group,e));
+const myName=()=>localStorage.getItem('group-buy-name')?.trim() || '';
+function markButton(group,e,field,label) {
+  const button=node('button',label);
+  button.type='button';button.className='mark';
+  button.setAttribute('aria-pressed',String(!!e[field]));
+  button.setAttribute('aria-label',label+'：'+e.name);
+  button.onclick=async()=>{
+    const token=generation,value=!e[field];
+    button.disabled=true;
+    try {
+      await request(api,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'mark',group:group.id,id:e.id,field,value})});
+      if(token!==generation)return;
+      e[field]=value;button.setAttribute('aria-pressed',String(value));
+      await refresh();
+    } catch(error){if(token===generation)notice(error.message);} finally{button.disabled=false;}
+  };
+  return button;
+}
+function csvCell(value) {
+  const text=String(value ?? '');
+  return /[",\r\n]/.test(text)?'"'+text.replaceAll('"','""')+'"':text;
+}
+function download(name,type,content) {
+  const url=URL.createObjectURL(new Blob([content],{type}));
+  const link=Object.assign(document.createElement('a'),{href:url,download:name});
+  document.body.append(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei'}).format(new Date()).replaceAll('-','');
+const safeName=text=>text.replace(/[\\/:*?"<>|\r\n]+/g,' ').trim().slice(0,60) || '團購';
+function exportCsv(group) {
+  const rows=[['姓名','品項','數量','小計','已付款','已取貨']];
+  for(const e of group.entries){
+    for(const item of entryOrder(group,e).items){
+      const {name,quantity}=splitOrderedItem(item.name);
+      rows.push([e.name,name,quantity,item.price,e.paid?'是':'',e.picked?'是':'']);
+    }
+  }
+  const summary=summarizeGroup(group);
+  rows.push([],['品項整理','','數量','小計'],...summary.rows.map(r=>['',r.name,r.count,r.amount]),['合計','',summary.count,summary.amount]);
+  download(safeName(group.title)+'_'+today()+'.csv','text/csv;charset=utf-8','﻿'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n'));
 }
 function headingText(group){
   return [group.title,group.notes,...group.items.filter(i=>!i.inactive).map(p=>p.name+' $'+p.price),'=================='].filter(Boolean).join('\n');
@@ -216,13 +270,14 @@ function showGroup(group,first) {
   current=group;
   const open=group.state==='open',archived=group.state==='history';
   $('round-status').replaceChildren(...roundInfo(group));
-  $('quick-summary').hidden=!open || !group.entries.length || location.hash.includes('/entry/');
+  $('quick-summary').hidden=!group.entries.length || location.hash.includes('/entry/');
   $('entry-forms').hidden=!open;
   $('detail').classList.toggle('readonly',!open);
   $('edit-group').hidden=archived;
   $('detail-back').href=archived?'#history':'#';
   $('detail-back').textContent=archived?'歷史清單':'全部團購';
   $('close-round').hidden=!open;$('archive-round').hidden=group.state!=='closed';
+  $('reopen-round').hidden=group.state!=='closed';$('reopen-round').href='#'+group.id+'/reopen';
   $('restart-round').hidden=open;
   $('restart-round').textContent=group.nextDeleted?'下一輪在回收清單':group.nextId?'前往下一輪':'重新開團';
   $('restart-round').href=group.nextDeleted?'#trash':group.nextId?'#'+group.nextId:'#'+group.id+'/restart';
@@ -246,17 +301,28 @@ function showGroup(group,first) {
   }
   $('join').hidden=!group.items.some(p=>!p.inactive);
 
-  const snapshot=JSON.stringify([group.id,group.revision,group.state,group.entries]);
+  const me=myName();
+  const snapshot=JSON.stringify([group.id,group.revision,group.state,group.entries,me]);
   if(snapshot===resultSnapshot)return;
   resultSnapshot=snapshot;
   const summary=summarizeGroup(group);
-  $('stats').textContent=group.entries.length+' 筆接龍 · '+summary.count+' 件 · 共 '+formatMoney.format(summary.amount)+' 元';
+  const paid=group.entries.filter(e=>e.paid).length,picked=group.entries.filter(e=>e.picked).length;
+  $('stats').textContent=group.entries.length+' 筆接龍 · '+summary.count+' 件 · 共 '+formatMoney.format(summary.amount)+' 元'
+    +(group.entries.length?' · 已付款 '+paid+'/'+group.entries.length+' · 已取貨 '+picked+'/'+group.entries.length:'');
   showReceipt(group,summary);
   $('chain').replaceChildren(node('pre',headingText(group)),...group.entries.map(e=>{
     const row=node('div',''),link=node('a','修改');
     row.className='entry';link.dataset.edit='';link.href='#'+group.id+'/entry/'+e.id;
     link.setAttribute('aria-label','修改 '+e.name+' 的接龍');
-    row.append(node('pre',entryText(group,e)));if(open)row.append(link);return row;
+    const text=node('pre',entryText(group,e));
+    if(me && e.name===me){
+      row.classList.add('mine');
+      const tag=node('span','我的');tag.className='mine-tag';
+      text.prepend(tag);
+    }
+    const marks=node('div','');marks.className='marks';
+    marks.append(markButton(group,e,'paid','已付款'),markButton(group,e,'picked','已取貨'));
+    row.append(text);if(open)row.append(link);row.append(marks);return row;
   }));
 }
 $('choices').oninput=totals;
@@ -356,13 +422,13 @@ async function route() {
   $('trash-tab').setAttribute('aria-current',trashList?'page':'false');
   $('list').hidden=!!hash && !historyList && !trashList;$('detail').hidden=true;$('create').hidden=true;
   $('new').hidden=hash==='new';$('edit-group').hidden=false;$('results').hidden=false;
-  $('entry-back').hidden=true;$('paste-form').hidden=false;$('detail').classList.remove('editing');
+  $('entry-back').hidden=true;$('entry-manage').hidden=true;$('paste-form').hidden=false;$('detail').classList.remove('editing');
   $('join').querySelector('h2').textContent='依品項填數量';
   $('paste-form').querySelector('h2').textContent='整段貼上訂單';
   $('send-paste').textContent='送出接龍';$('submit-quantity').textContent='送出接龍';
   window.scrollTo(0,0);
   if(hash==='new'){groupForm(null);return;}
-  const match=hash.match(/^([a-f0-9-]{36})\/(edit|restart|entry\/([a-f0-9-]{36}))$/);
+  const match=hash.match(/^([a-f0-9-]{36})\/(edit|restart|reopen|entry\/([a-f0-9-]{36}))$/);
   if(match){
     try {
       const group=await request(api+'?id='+match[1]);
@@ -372,9 +438,11 @@ async function route() {
       if(match[2]==='restart'){
         if(group.nextDeleted){location.replace('#trash');return;}
         if(group.state==='open' || group.nextId){location.replace('#'+(group.nextId || group.id));return;}
-        $('restart-title').textContent=group.title;
-        $('restart-back').href='#'+group.id;setDeadline($('restart-form'),null);
-        $('restart-page').hidden=false;return;
+        showRoundForm(group,'restart');return;
+      }
+      if(match[2]==='reopen'){
+        if(group.state!=='closed'){location.replace('#'+group.id);return;}
+        showRoundForm(group,'reopen');return;
       }
       if(group.state==='history' || (match[3] && group.state!=='open')){location.replace('#'+group.id);return;}
       if(match[2]==='edit'){groupForm(group);return;}
@@ -382,7 +450,7 @@ async function route() {
       if(!entry){location.replace('#'+group.id);return;}
       showGroup(group,true); editingEntry=entry;
       $('detail').hidden=false;$('detail').classList.add('editing');
-      $('entry-back').href='#'+group.id;$('entry-back').hidden=false;
+      $('entry-back').href='#'+group.id;$('entry-back').hidden=false;$('entry-manage').hidden=false;
       $('results').hidden=true;$('edit-group').hidden=true;
       $('paste-form').hidden=!entry.pasted;$('join').hidden=!!entry.pasted;
       if(entry.pasted){
@@ -460,13 +528,27 @@ $('paste-form').onsubmit=async event=>{
     pasteId=crypto.randomUUID(); input.value=''; notice('已加入接龍'); await refresh();
   } catch(e){notice(e.message);} finally{input.readOnly=false;previewPaste();}
 };
+let roundMode='restart';
+const roundForms={
+  restart:{heading:'重新開團',text:'沿用團名、備註、品項和菜單。上一輪接龍會保存在歷史清單，新一輪從空白開始。',legend:'新一輪截止日期與時間（台灣）',submit:'開始新一輪'},
+  reopen:{heading:'重新開放收單',text:'保留目前的接龍，繼續收單。截止時間可留空。',legend:'新的截止日期與時間（台灣）',submit:'重新開放'},
+};
+function showRoundForm(group,mode) {
+  roundMode=mode;
+  const copy=roundForms[mode];
+  $('restart-heading').textContent=copy.heading;$('restart-text').textContent=copy.text;
+  $('restart-legend').textContent=copy.legend;$('restart-submit').textContent=copy.submit;
+  $('restart-title').textContent=group.title;
+  $('restart-back').href='#'+group.id;setDeadline($('restart-form'),null);
+  $('restart-page').hidden=false;
+}
 async function changeRound(action,button,deadline=null,group=current) {
   const token=generation;
   button.disabled=true;
   try {
     const result=await request(api,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({group:group.id,revision:group.revision,action,deadline})});
     if(token!==generation)return;
-    if(action==='restart')location.replace('#'+result.id);
+    if(action==='restart' || action==='reopen')location.replace('#'+result.id);
     else if(action==='trash')location.replace('#trash');
     else if(action==='restore')location.hash=result.id;
     else if(action==='archive')location.hash='history';
@@ -501,7 +583,26 @@ $('share-group').onclick=async()=>{
 };
 $('close-round').onclick=e=>{if(confirm('立即截單？截單後將停止接受接龍。'))void changeRound('close',e.currentTarget);};
 $('archive-round').onclick=e=>void changeRound('archive',e.currentTarget);
-$('restart-form').onsubmit=e=>{e.preventDefault();void changeRound('restart',e.submitter,getDeadline(e.currentTarget));};
+$('restart-form').onsubmit=e=>{e.preventDefault();void changeRound(roundMode,e.submitter,getDeadline(e.currentTarget));};
+$('delete-entry').onclick=async e=>{
+  const entry=editingEntry,button=e.currentTarget,token=generation;
+  if(!entry || !confirm('刪除「'+entry.name+'」的接龍？刪除後不會列入統計。'))return;
+  button.disabled=true;
+  try {
+    await request(api,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'removeEntry',group:current.id,id:entry.id,revision:entry.revision})});
+    if(token!==generation)return;
+    leaveEditor();
+  } catch(error){if(token===generation)notice(error.message);} finally{button.disabled=false;}
+};
+$('export-csv').onclick=()=>{if(current)exportCsv(current);};
+$('backup').onclick=async e=>{
+  const button=e.currentTarget;
+  button.disabled=true;
+  try {
+    const data=await request(api+'?backup=1');
+    download('團購接龍備份_'+today()+'.json','application/json',JSON.stringify(data,null,1));
+  } catch(error){notice(error.message);} finally{button.disabled=false;}
+};
 $('copy').onclick=async()=>{
   const text=summaryMode?[current.title,...summaryLines(current),$('stats').textContent].join('\n'):formatChain(current);
   try {
