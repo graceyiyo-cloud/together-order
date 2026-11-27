@@ -7,8 +7,12 @@ const api = location.hostname === 'graceyiyo-cloud.github.io'
 let current, entryId, generation = 0, refreshTimer;
 const node = (tag, text) => Object.assign(document.createElement(tag), {textContent:text});
 let summaryMode=false, listSnapshot='', resultSnapshot='';
-const dateFormat=new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
-const dateLabel=seconds=>dateFormat.format(new Date(seconds*1000));
+const dateFormat=new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',weekday:'narrow',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+// Taiwan (ROC) year with weekday, e.g. "115/11/30（一） 16：00".
+function dateLabel(seconds) {
+  const p=Object.fromEntries(dateFormat.formatToParts(new Date(seconds*1000)).map(x=>[x.type,x.value]));
+  return (Number(p.year)-1911)+'/'+p.month+'/'+p.day+'（'+p.weekday.replace('週','')+'） '+p.hour+'：'+p.minute;
+}
 function roundInfo(group) {
   const status=node('span',{open:'收單中',closed:'已截單',history:'已歸檔'}[group.state]);
   status.className='state '+group.state;
@@ -80,11 +84,6 @@ function setResults(summary) {
 }
 $('summary-tab').onclick=()=>setResults(true);
 $('chain-tab').onclick=()=>setResults(false);
-$('quick-summary').onclick=()=>{
-  setResults(true);
-  $('summary-tab').focus({preventScroll:true});
-  $('results').scrollIntoView({block:'start'});
-};
 function notice(text='') {
   $('message').textContent=text;
   $('message').hidden=!text;
@@ -271,7 +270,6 @@ function showGroup(group,first) {
   current=group;
   const open=group.state==='open',archived=group.state==='history';
   $('round-status').replaceChildren(...roundInfo(group));
-  $('quick-summary').hidden=!group.entries.length || location.hash.includes('/entry/');
   $('entry-forms').hidden=!open;
   $('detail').classList.toggle('readonly',!open);
   $('edit-group').hidden=archived;
