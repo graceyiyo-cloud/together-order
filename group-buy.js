@@ -84,7 +84,10 @@ function notice(text='') {
 }
 async function request(url, options) {
   const response=await fetch(url,{cache:'no-store',...options});
-  if (!response.ok) throw Error((await response.json().catch(()=>({}))).error || '連線失敗，請重試');
+  if (!response.ok) {
+    const error = new Error((await response.json().catch(()=>({}))).error || '連線失敗，請重試');
+    throw Object.assign(error,{status:response.status});
+  }
   return response.json();
 }
 function linkedNote(text) {
@@ -116,8 +119,11 @@ function linkedNote(text) {
 }
 
 function cardNotes(notes) {
-  const [firstLine,...rest] = notes.split(/\r?\n/);
-  const preview = node('p','');
+  const [firstLine,...rest] = notes.trim().split(/\r?\n/);
+  const block = node('dl','');
+  block.className = 'group-note';
+  const preview = node('dd','');
+  block.append(node('dt','團購備註'),preview);
   preview.append(linkedNote(firstLine));
   const seen = new Set([...preview.querySelectorAll('a')].map(link=>link.href));
   for (const link of linkedNote(rest.join('\n')).querySelectorAll('a')) {
@@ -126,7 +132,7 @@ function cardNotes(notes) {
     if (preview.textContent) preview.append('\n');
     preview.append(link);
   }
-  return preview;
+  return block;
 }
 function field(label, attributes) {
   const wrapper=node('label',label);
@@ -218,9 +224,10 @@ function showGroup(group,first) {
   $('detail-back').textContent=archived?'歷史清單':'全部團購';
   $('close-round').hidden=!open;$('archive-round').hidden=group.state!=='closed';
   $('restart-round').hidden=open;
-  $('restart-round').textContent=group.nextId?'前往下一輪':'重新開團';
-  $('restart-round').href=group.nextId?'#'+group.nextId:'#'+group.id+'/restart';
+  $('restart-round').textContent=group.nextDeleted?'下一輪在回收清單':group.nextId?'前往下一輪':'重新開團';
+  $('restart-round').href=group.nextDeleted?'#trash':group.nextId?'#'+group.nextId:'#'+group.id+'/restart';
   $('title').textContent=group.title;
+  $('detail-note').hidden=!group.notes?.trim();
   if ($('notes').textContent!==group.notes) $('notes').replaceChildren(linkedNote(group.notes));
   setMenu(group.menu ? api+'?id='+group.id+'&menu=1&v='+group.revision : '');
   $('edit-group').href='#'+group.id+'/edit';
@@ -253,35 +260,56 @@ function showGroup(group,first) {
   }));
 }
 $('choices').oninput=totals;
+function showLoadError(error) {
+  if (error.status!==410 && error.status!==404) {notice(error.message);return;}
+  current=null;
+  setMenu('');
+  $('detail').hidden=true;
+  $('missing-title').textContent=error.message;
+  $('missing-trash').hidden=error.status!==410;
+  $('unavailable').hidden=false;
+}
+function trashCard(group) {
+  const card=node('div','');
+  card.className='trash-card';
+  const restore=node('button','還原團購');
+  restore.type='button';
+  restore.className='restore-group';
+  restore.setAttribute('aria-label','還原團購「'+group.title+'」');
+  restore.onclick=()=>void changeRound('restore',restore,null,group);
+  card.append(node('strong',group.title),node('small','刪除於 '+dateLabel(group.deletedAt)),restore);
+  return card;
+}
 async function refresh(first=false) {
   const token=generation, hash=location.hash.slice(1);
   if(hash==='new')return;
   try {
-    const detail=hash && hash!=='history';
-    const data=await request(api+(detail?'?id='+encodeURIComponent(hash):''));
+    const trash=hash==='trash',detail=hash && hash!=='history' && !trash;
+    const data=await request(api+(detail?'?id='+encodeURIComponent(hash):trash?'?trash=1':''));
     if(token!==generation)return;
-    if(detail) {showGroup(data,!current); $('detail').hidden=false;}
+    if(detail) {showGroup(data,!current); $('unavailable').hidden=true; $('detail').hidden=false;}
     else {
       const history=hash==='history';
-      const groups=data.filter(g=>(g.state==='history')===history);
+      const groups=trash?data:data.filter(g=>(g.state==='history')===history);
       if(history)groups.sort((a,b)=>b.archivedAt-a.archivedAt);
-      else groups.sort((a,b)=>Number(b.state==='open')-Number(a.state==='open') || (a.deadline??Infinity)-(b.deadline??Infinity));
+      else if(!trash)groups.sort((a,b)=>Number(b.state==='open')-Number(a.state==='open') || (a.deadline??Infinity)-(b.deadline??Infinity));
       const snapshot=JSON.stringify([hash,groups]);
       if(snapshot===listSnapshot)return;
       listSnapshot=snapshot;
       $('cards').replaceChildren(...groups.map(g=>{
+        if(trash)return trashCard(g);
         const card=node('div','');card.className='card';
         const titleLink=node('a','');titleLink.className='card-title';titleLink.href='#'+g.id;
         titleLink.append(node('strong',g.title));
         const info=node('div','');info.className='round-info';info.append(...roundInfo(g));
         card.append(titleLink,info);
         if(history)card.append(node('small','歸檔 '+dateLabel(g.archivedAt)));
-        if(g.notes)card.append(cardNotes(g.notes));
+        if(g.notes?.trim())card.append(cardNotes(g.notes));
         return card;
       }));
-      if(!groups.length)$('cards').textContent=history?'目前沒有已歸檔的團購。':'還沒有團購，從「開新團」開始。';
+      if(!groups.length)$('cards').textContent=trash?'回收清單是空的。':history?'目前沒有已歸檔的團購。':'還沒有團購，從「開新團」開始。';
     }
-  } catch(e){if(token===generation)notice(e.message);}
+  } catch(e){if(token===generation)showLoadError(e);}
 }
 function groupForm(group) {
   const form=$('create-form');
@@ -318,13 +346,15 @@ async function route() {
   clearInterval(refreshTimer); const token=++generation;
   current=null;editingEntry=null;editingGroup=false;notice();
   const hash=location.hash.slice(1);
-  const historyList=hash==='history';
+  const historyList=hash==='history',trashList=hash==='trash';
+  $('unavailable').hidden=true;$('share-fallback').hidden=true;
   listSnapshot='';resultSnapshot='';setResults(false);
   $('manage').hidden=false;$('restart-page').hidden=true;
-  $('list-title').textContent=historyList?'歷史清單':'目前的團購';
-  $('active-tab').setAttribute('aria-current',historyList?'false':'page');
+  $('list-title').textContent=trashList?'回收清單':historyList?'歷史清單':'目前的團購';
+  $('active-tab').setAttribute('aria-current',hash?'false':'page');
   $('history-tab').setAttribute('aria-current',historyList?'page':'false');
-  $('list').hidden=!!hash && !historyList;$('detail').hidden=true;$('create').hidden=true;
+  $('trash-tab').setAttribute('aria-current',trashList?'page':'false');
+  $('list').hidden=!!hash && !historyList && !trashList;$('detail').hidden=true;$('create').hidden=true;
   $('new').hidden=hash==='new';$('edit-group').hidden=false;$('results').hidden=false;
   $('entry-back').hidden=true;$('paste-form').hidden=false;$('detail').classList.remove('editing');
   $('join').querySelector('h2').textContent='依品項填數量';
@@ -340,6 +370,7 @@ async function route() {
       current=group;
       $('manage').hidden=true;
       if(match[2]==='restart'){
+        if(group.nextDeleted){location.replace('#trash');return;}
         if(group.state==='open' || group.nextId){location.replace('#'+(group.nextId || group.id));return;}
         $('restart-title').textContent=group.title;
         $('restart-back').href='#'+group.id;setDeadline($('restart-form'),null);
@@ -361,10 +392,10 @@ async function route() {
         $('join').querySelector('h2').textContent='修改接龍';$('join').elements.name.value=entry.name;
         showCatalog(group,entry.quantities);$('submit-quantity').textContent='儲存修改';
       }
-    }catch(e){if(token===generation)notice(e.message);}
+    }catch(e){if(token===generation)showLoadError(e);}
     return;
   }
-  if(hash && !historyList && !/^[a-f0-9-]{36}$/.test(hash)){location.replace('#');return;}
+  if(hash && !historyList && !trashList && !/^[a-f0-9-]{36}$/.test(hash)){location.replace('#');return;}
   void refresh(true);
   refreshTimer=setInterval(()=>{if(!document.hidden)void refresh();},5000);
 }
@@ -429,17 +460,45 @@ $('paste-form').onsubmit=async event=>{
     pasteId=crypto.randomUUID(); input.value=''; notice('已加入接龍'); await refresh();
   } catch(e){notice(e.message);} finally{input.readOnly=false;previewPaste();}
 };
-async function changeRound(action,button,deadline=null) {
-  const group=current, token=generation;
+async function changeRound(action,button,deadline=null,group=current) {
+  const token=generation;
   button.disabled=true;
   try {
     const result=await request(api,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({group:group.id,revision:group.revision,action,deadline})});
     if(token!==generation)return;
     if(action==='restart')location.replace('#'+result.id);
+    else if(action==='trash')location.replace('#trash');
+    else if(action==='restore')location.hash=result.id;
     else if(action==='archive')location.hash='history';
     else {await refresh();notice('本團已截單');}
-  } catch(e){notice(e.message);} finally {button.disabled=false;}
+  } catch(e){if(token===generation)notice(e.message);} finally {button.disabled=false;}
 }
+$('delete-group').onclick=e=>{
+  if(current && confirm('刪除「'+current.title+'」？這團會移至回收清單，可連同接龍和菜單一起還原。')) {
+    void changeRound('trash',e.currentTarget);
+  }
+};
+$('share-group').onclick=async()=>{
+  if(!current)return;
+  const token=generation;
+  const url=new URL(location.pathname,location.origin);
+  if(location.hostname==='yi-qi-dian-can.graceyiyo.chatgpt.site')url.href='https://graceyiyo-cloud.github.io/together-order/';
+  url.hash=current.id;
+  const share={title:current.title,url:url.href};
+  if(navigator.share){
+    try {await navigator.share(share);return;}
+    catch(error){if(error.name==='AbortError' || token!==generation)return;}
+  }
+  try {
+    await navigator.clipboard.writeText(share.url);
+    if(token===generation)notice('已複製這一團的連結，可以貼到 LINE');
+  } catch {
+    if(token!==generation)return;
+    const field=$('share-fallback');
+    const input=field.querySelector('input');
+    field.hidden=false;input.value=share.url;input.focus();input.select();
+  }
+};
 $('close-round').onclick=e=>{if(confirm('立即截單？截單後將停止接受接龍。'))void changeRound('close',e.currentTarget);};
 $('archive-round').onclick=e=>void changeRound('archive',e.currentTarget);
 $('restart-form').onsubmit=e=>{e.preventDefault();void changeRound('restart',e.submitter,getDeadline(e.currentTarget));};
