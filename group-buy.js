@@ -579,7 +579,7 @@ $('share-group').onclick=async()=>{
   url.hash=current.id.slice(0,8);
   // Skip the suffix when the title already reads as a group buy, e.g. "…團購", "…預購", "…團".
   const heading=/團購|[購團]$/.test(current.title)?current.title:current.title+'團購';
-  const text=[heading,current.deadline && '截止 '+dateLabel(current.deadline),current.notes?.trim(),url.href].filter(Boolean).join('\n');
+  const text=[heading,current.deadline && '截止 '+dateLabel(current.deadline),current.notes?.replace(/\r\n?/g,'\n').trim(),url.href].filter(Boolean).join('\n');
   // Copy straight away instead of opening the system share sheet.
   try {
     await navigator.clipboard.writeText(text);
