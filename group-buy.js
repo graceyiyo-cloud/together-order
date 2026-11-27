@@ -109,15 +109,48 @@ function formatChain(group) {
 let editingEntry=null,editingGroup=false;
 function showCatalog(group,values=[]) {
   $('choices').replaceChildren(...group.items.map((p,i)=>{
-    const row=field(p.name+' · '+p.price+' 元'+(p.inactive?'（已移除）':''),{type:'text',pattern:'[0-9]{1,3}',maxLength:3,placeholder:'0',inputMode:'numeric',autocomplete:'off',value:values[i]||''});
+    const original=values[i] || 0;
+    const limit=p.inactive ? original : 999;
+    const row=node('div','');
     row.className='choice';
-    row.hidden=!!p.inactive && !values[i];
+    row.hidden=!!p.inactive && !original;
+    const label=node('label',p.name);
+    label.htmlFor='quantity-'+i;
+    label.append(node('small',p.price+' 元'+(p.inactive?' · 已移除':'')));
+    const stepper=node('div','');
+    stepper.className='stepper';
+    const input=Object.assign(document.createElement('input'),{
+      id:label.htmlFor,type:'text',pattern:'[0-9]{1,3}',maxLength:3,placeholder:'0',
+      inputMode:'numeric',autocomplete:'off',value:original ? String(original) : ''
+    });
+    input.dataset.limit=String(limit);
+    input.setAttribute('aria-label',p.name+' · '+p.price+' 元');
+    const stepButton=(delta,mark,action)=>{
+      const button=node('button',mark);
+      button.type='button';
+      button.setAttribute('aria-label',action+'「'+p.name+'」數量');
+      button.onclick=()=>{
+        const next=Math.max(0,Math.min(limit,(Number(input.value)||0)+delta));
+        input.value=String(next);
+        totals();
+      };
+      return button;
+    };
+    stepper.append(stepButton(-1,'−','減少'),input,stepButton(1,'＋','增加'));
+    row.append(label,stepper);
     return row;
   }));
   totals();
 }
 function totals() {
-  const quantities=[...$('choices').querySelectorAll('input')].map(i=>/^\d{1,3}$/.test(i.value)?Number(i.value):0);
+  const quantities=[...$('choices').querySelectorAll('input')].map(input=>{
+    const value=/^\d{1,3}$/.test(input.value)?Number(input.value):0;
+    const limit=Number(input.dataset.limit);
+    input.previousElementSibling.disabled=value<=0;
+    input.nextElementSibling.disabled=value>=limit;
+    input.setCustomValidity(value>limit?'此品項最多可填 '+limit+' 份':'');
+    return value;
+  });
   $('subtotal').textContent=quantities.reduce((sum,q,i)=>sum+q*current.items[i].price,0)+' 元';
   return quantities;
 }
@@ -131,7 +164,7 @@ function showGroup(group,first) {
   $('detail').classList.toggle('readonly',!open);
   $('edit-group').hidden=archived;
   $('detail-back').href=archived?'#history':'#';
-  $('detail-back').textContent=archived?'‹ 歷史清單':'‹ 全部團購';
+  $('detail-back').textContent=archived?'歷史清單':'全部團購';
   $('close-round').hidden=!open;$('archive-round').hidden=group.state!=='closed';
   $('restart-round').hidden=open;
   $('restart-round').textContent=group.nextId?'前往下一輪':'重新開團';
@@ -211,7 +244,7 @@ function groupForm(group) {
   $('group-heading').textContent=group?'編輯團購':'開新團';
   $('save-group').textContent=group?'儲存團購':'開始收單';
   $('form-back').href=group?'#'+group.id:'#';
-  $('form-back').textContent=group?'取消修改':'‹ 全部團購';
+  $('form-back').textContent=group?'取消修改':'全部團購';
   $('remove-menu-label').hidden=!group?.menu;
   $('price-note').hidden=!group?.items.some(p=>!p.inactive);
   $('create').hidden=false;
@@ -245,7 +278,7 @@ async function route() {
   $('entry-back').hidden=true;$('paste-form').hidden=false;$('detail').classList.remove('editing');
   $('join').querySelector('h2').textContent='依品項填數量';
   $('paste-form').querySelector('h2').textContent='整段貼上訂單';
-  $('send-paste').textContent='確認加入接龍';$('join').querySelector('button').textContent='加入接龍';
+  $('send-paste').textContent='確認加入接龍';$('submit-quantity').textContent='加入接龍';
   window.scrollTo(0,0);
   if(hash==='new'){groupForm(null);return;}
   const match=hash.match(/^([a-f0-9-]{36})\/(edit|restart|entry\/([a-f0-9-]{36}))$/);
@@ -275,7 +308,7 @@ async function route() {
         $('paste').value=formatOrder(entry.pasted);previewPaste();$('send-paste').textContent='儲存修改';
       }else{
         $('join').querySelector('h2').textContent='修改接龍';$('join').elements.name.value=entry.name;
-        showCatalog(group,entry.quantities);$('join').querySelector('button').textContent='儲存修改';
+        showCatalog(group,entry.quantities);$('submit-quantity').textContent='儲存修改';
       }
     }catch(e){if(token===generation)notice(e.message);}
     return;
