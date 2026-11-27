@@ -211,8 +211,9 @@ function exportCsv(group) {
   rows.push([],['品項整理','','數量','小計'],...summary.rows.map(r=>['',r.name,r.count,r.amount]),['合計','',summary.count,summary.amount]);
   download(safeName(group.title)+'_'+today()+'.csv','text/csv;charset=utf-8','﻿'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n'));
 }
+// The notes already sit at the top of the page, so the chain leaves them out.
 function headingText(group){
-  return [group.title,group.notes,...group.items.filter(i=>!i.inactive).map(p=>p.name+' $'+p.price),'=================='].filter(Boolean).join('\n');
+  return [group.title,...group.items.filter(i=>!i.inactive).map(p=>p.name+' $'+p.price),'=================='].filter(Boolean).join('\n');
 }
 function formatChain(group) {
   return [headingText(group),...group.entries.map(e=>entryText(group,e))].join('\n\n');
@@ -463,6 +464,15 @@ async function route() {
     }catch(e){if(token===generation)showLoadError(e);}
     return;
   }
+  if(/^[a-f0-9]{8}$/.test(hash)){
+    try {
+      const found=(await request(api)).filter(g=>g.id.startsWith(hash));
+      if(token!==generation)return;
+      if(found.length===1){location.replace('#'+found[0].id);return;}
+      showLoadError({status:404,message:'找不到這一團'});
+    } catch(e){if(token===generation)showLoadError(e);}
+    return;
+  }
   if(hash && !historyList && !trashList && !/^[a-f0-9-]{36}$/.test(hash)){location.replace('#');return;}
   void refresh(true);
   refreshTimer=setInterval(()=>{if(!document.hidden)void refresh();},5000);
@@ -565,20 +575,22 @@ $('share-group').onclick=async()=>{
   const token=generation;
   const url=new URL(location.pathname,location.origin);
   if(location.hostname==='yi-qi-dian-can.graceyiyo.chatgpt.site')url.href='https://graceyiyo-cloud.github.io/together-order/';
-  url.hash=current.id;
-  const share={title:current.title,url:url.href};
+  // The first 8 characters of the id are enough to find the group; route() expands them.
+  url.hash=current.id.slice(0,8);
+  const heading=current.title.includes('團購')?current.title:current.title+'團購';
+  const text=heading+'\n'+url.href;
   if(navigator.share){
-    try {await navigator.share(share);return;}
+    try {await navigator.share({text});return;}
     catch(error){if(error.name==='AbortError' || token!==generation)return;}
   }
   try {
-    await navigator.clipboard.writeText(share.url);
+    await navigator.clipboard.writeText(text);
     if(token===generation)notice('已複製這一團的連結，可以貼到 LINE');
   } catch {
     if(token!==generation)return;
     const field=$('share-fallback');
     const input=field.querySelector('input');
-    field.hidden=false;input.value=share.url;input.focus();input.select();
+    field.hidden=false;input.value=url.href;input.focus();input.select();
   }
 };
 $('close-round').onclick=e=>{if(confirm('立即截單？截單後將停止接受接龍。'))void changeRound('close',e.currentTarget);};
