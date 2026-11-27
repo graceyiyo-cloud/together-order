@@ -11,3 +11,15 @@
 #menu-content img,#menu-content canvas{display:block;max-width:100%;height:auto;margin:auto}
 #menu-pages:not([hidden]){display:flex;align-items:center;justify-content:center;gap:14px;margin-top:12px}
 #menu-status{margin:0}#menu-status:empty{display:none}
+
+.tabs,.manage,.date-row,.round-info{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tabs{margin:6px 0 16px}.tabs a,.tabs button{display:inline-flex;align-items:center;min-height:44px;border:1px solid #cbd3c6;padding:7px 14px;background:#fffefb;color:#4e614a;border-radius:10px;text-decoration:none}
+.tabs [aria-current="page"],.tabs [aria-pressed="true"]{background:#e0e9db;font-weight:700;border-color:#8a9c83}
+.round-info{font-size:15px}.card .round-info{display:flex;margin:8px 0}.round-info .state{display:inline-block;border-radius:8px;padding:2px 9px;background:#e4edde;color:#435c3e;font-weight:700}
+.round-info .state.closed,.round-info .state.history{background:#ede5db;color:#705641}.round-info .due{font-weight:700;color:#604a36}
+.date-row select{font:inherit;border:1px solid #c9d0c4;background:white;border-radius:8px;color:inherit;min-height:44px;padding:6px}.date-row input{width:auto;max-width:100%;min-height:44px}.manage{margin-top:20px}.manage a{display:inline-flex;align-items:center}
+#detail.readonly .cols{display:block}#restart-page{max-width:650px}.summary-line{padding:9px 0;margin:0;border-top:1px solid #dedfd7}.card p{margin:0;overflow-wrap:anywhere}
+
+[hidden]{display:none!important}
+
+.round-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}#results{scroll-margin-top:12px}

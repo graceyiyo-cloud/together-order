@@ -5,6 +5,69 @@ const api = location.hostname === 'graceyiyo-cloud.github.io'
   ? 'https://yi-qi-dian-can.graceyiyo.chatgpt.site/api/groups' : '/api/groups';
 let current, entryId, generation = 0, refreshTimer;
 const node = (tag, text) => Object.assign(document.createElement(tag), {textContent:text});
+let summaryMode=false, listSnapshot='', resultSnapshot='';
+const dateFormat=new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+const dateLabel=seconds=>dateFormat.format(new Date(seconds*1000));
+function roundInfo(group) {
+  const status=node('span',{open:'收單中',closed:'已截單',history:'已歸檔'}[group.state]);
+  status.className='state '+group.state;
+  const end=group.deadline ?? group.closedAt;
+  const due=node('span',end ? (group.deadline?'截止 ':'截單 ')+dateLabel(end) : '未設截止時間');
+  due.className='due';
+  return [status,due];
+}
+function initPicker(box) {
+  const row=node('div','');row.className='date-row';
+  const date=document.createElement('input');date.type='date';date.name='endDate';date.setAttribute('aria-label','截止日期');
+  date.addEventListener('click',()=>{try{date.showPicker?.();}catch{}});
+  row.append(date);
+  for (const [name,count,label] of [['endHour',24,'時'],['endMinute',60,'分']]) {
+    const select=document.createElement('select');select.name=name;select.setAttribute('aria-label','截止'+label);
+    for(let i=0;i<count;i++){const value=String(i).padStart(2,'0');select.add(new Option(value,value));}
+    row.append(select,node('span',label));
+  }
+  date.oninput=()=>{row.querySelectorAll('select').forEach(el=>el.disabled=!date.value);};
+  box.append(row);
+}
+document.querySelectorAll('.deadline-picker').forEach(initPicker);
+function setDeadline(form,seconds) {
+  const iso=seconds?new Date((seconds+28800)*1000).toISOString():'';
+  form.elements.endDate.value=iso.slice(0,10);
+  form.elements.endHour.value=iso.slice(11,13)||'17';
+  form.elements.endMinute.value=iso.slice(14,16)||'00';
+  form.elements.endDate.oninput();
+}
+function getDeadline(form) {
+  const f=form.elements;
+  return f.endDate.value ? Date.parse(f.endDate.value+'T'+f.endHour.value+':'+f.endMinute.value+':00+08:00')/1000 : null;
+}
+function summaryLines(group) {
+  const catalog=new Map(), pasted=new Map();
+  function add(map,name,count,amount) {
+    const row=map.get(name)||{count:0,amount:0};
+    row.count+=count;row.amount+=amount;map.set(name,row);
+  }
+  for(const e of group.entries){
+    if(e.pasted) e.pasted.items.forEach(i=>add(pasted,i.name,1,i.price));
+    else e.quantities.forEach((q,i)=>{if(q)add(catalog,group.items[i].name,q,q*group.items[i].price);});
+  }
+  return [...catalog].map(([name,r])=>name+' × '+r.count+'　'+r.amount+' 元')
+    .concat([...pasted].map(([name,r])=>name+' · '+r.count+' 筆明細　'+r.amount+' 元'));
+}
+function setResults(summary) {
+  summaryMode=summary;
+  $('summary').hidden=!summary;$('chain').hidden=summary;
+  $('chain-tab').setAttribute('aria-pressed',String(!summary));
+  $('summary-tab').setAttribute('aria-pressed',String(summary));
+  $('copy').textContent=summary?'複製整理':'複製接龍';
+}
+$('summary-tab').onclick=()=>setResults(true);
+$('chain-tab').onclick=()=>setResults(false);
+$('quick-summary').onclick=()=>{
+  setResults(true);
+  $('summary-tab').focus({preventScroll:true});
+  $('results').scrollIntoView({block:'start'});
+};
 function notice(text='') {
   $('message').textContent=text;
   $('message').hidden=!text;
@@ -46,7 +109,7 @@ function formatChain(group) {
 let editingEntry=null,editingGroup=false;
 function showCatalog(group,values=[]) {
   $('choices').replaceChildren(...group.items.map((p,i)=>{
-    const row=field(p.name+' · '+p.price+' 元'+(p.inactive?'（已移除）':''),{type:'number',min:'0',max:String(p.inactive?(values[i]||0):999),step:'1',placeholder:'0',inputMode:'numeric',value:values[i]||''});
+    const row=field(p.name+' · '+p.price+' 元'+(p.inactive?'（已移除）':''),{type:'text',pattern:'[0-9]{1,3}',maxLength:3,placeholder:'0',inputMode:'numeric',autocomplete:'off',value:values[i]||''});
     row.className='choice';
     row.hidden=!!p.inactive && !values[i];
     return row;
@@ -54,13 +117,25 @@ function showCatalog(group,values=[]) {
   totals();
 }
 function totals() {
-  const quantities=[...$('choices').querySelectorAll('input')].map(i=>Number(i.value));
+  const quantities=[...$('choices').querySelectorAll('input')].map(i=>/^\d{1,3}$/.test(i.value)?Number(i.value):0);
   $('subtotal').textContent=quantities.reduce((sum,q,i)=>sum+q*current.items[i].price,0)+' 元';
   return quantities;
 }
 function showGroup(group,first) {
   const catalogChanged=current && JSON.stringify(current.items)!==JSON.stringify(group.items);
   current=group;
+  const open=group.state==='open',archived=group.state==='history';
+  $('round-status').replaceChildren(...roundInfo(group));
+  $('quick-summary').hidden=!open || !group.entries.length || location.hash.includes('/entry/');
+  $('entry-forms').hidden=!open;
+  $('detail').classList.toggle('readonly',!open);
+  $('edit-group').hidden=archived;
+  $('detail-back').href=archived?'#history':'#';
+  $('detail-back').textContent=archived?'‹ 歷史清單':'‹ 全部團購';
+  $('close-round').hidden=!open;$('archive-round').hidden=group.state!=='closed';
+  $('restart-round').hidden=open;
+  $('restart-round').textContent=group.nextId?'前往下一輪':'重新開團';
+  $('restart-round').href=group.nextId?'#'+group.nextId:'#'+group.id+'/restart';
   $('title').textContent=group.title;
   $('notes').textContent=group.notes;
   setMenu(group.menu ? api+'?id='+group.id+'&menu=1&v='+group.revision : '');
@@ -83,11 +158,16 @@ function showGroup(group,first) {
   const count=group.entries.reduce((s,e)=>s+(e.pasted ? e.pasted.items.length : e.quantities.reduce((a,b)=>a+b,0)),0);
   const amount=group.entries.reduce((s,e)=>s+(e.pasted ? e.pasted.total : e.quantities.reduce((a,q,i)=>a+q*group.items[i].price,0)),0);
   $('stats').textContent=group.entries.length+' 筆接龍 · '+count+' 件 · 共 '+amount+' 元';
+  const snapshot=JSON.stringify([group.id,group.revision,group.state,group.entries]);
+  if(snapshot===resultSnapshot)return;
+  resultSnapshot=snapshot;
+  $('summary').replaceChildren(...summaryLines(group).map(line=>{const p=node('p',line);p.className='summary-line';return p;}));
+  if(!group.entries.length)$('summary').textContent='目前沒有接龍。';
   $('chain').replaceChildren(node('pre',headingText(group)),...group.entries.map(e=>{
     const row=node('div',''),link=node('a','修改');
     row.className='entry';link.dataset.edit='';link.href='#'+group.id+'/entry/'+e.id;
     link.setAttribute('aria-label','修改 '+e.name+' 的接龍');
-    row.append(node('pre',entryText(group,e)),link);return row;
+    row.append(node('pre',entryText(group,e)));if(open)row.append(link);return row;
   }));
 }
 $('choices').oninput=totals;
@@ -95,22 +175,34 @@ async function refresh(first=false) {
   const token=generation, hash=location.hash.slice(1);
   if(hash==='new')return;
   try {
-    const data=await request(api+(hash?'?id='+encodeURIComponent(hash):''));
+    const detail=hash && hash!=='history';
+    const data=await request(api+(detail?'?id='+encodeURIComponent(hash):''));
     if(token!==generation)return;
-    if(hash) {showGroup(data,!current); $('detail').hidden=false;}
+    if(detail) {showGroup(data,!current); $('detail').hidden=false;}
     else {
-      $('cards').replaceChildren(...data.map(g=>{
-        const card=node('a',''); card.href='#'+g.id; card.className='card';
-        card.append(node('strong',g.title),node('span',g.notes.split('\n')[0])); return card;
+      const history=hash==='history';
+      const groups=data.filter(g=>(g.state==='history')===history);
+      if(history)groups.sort((a,b)=>b.archivedAt-a.archivedAt);
+      else groups.sort((a,b)=>Number(b.state==='open')-Number(a.state==='open') || (a.deadline??Infinity)-(b.deadline??Infinity));
+      const snapshot=JSON.stringify([hash,groups]);
+      if(snapshot===listSnapshot)return;
+      listSnapshot=snapshot;
+      $('cards').replaceChildren(...groups.map(g=>{
+        const card=node('a','');card.href='#'+g.id;card.className='card';
+        const info=node('div','');info.className='round-info';info.append(...roundInfo(g));
+        card.append(node('strong',g.title),info);
+        if(history)card.append(node('small','歸檔 '+dateLabel(g.archivedAt)));
+        if(g.notes)card.append(node('p',g.notes.split('\n')[0]));
+        return card;
       }));
-      if(!data.length)$('cards').textContent='還沒有團購，從「開新團」開始。';
+      if(!groups.length)$('cards').textContent=history?'目前沒有已歸檔的團購。':'還沒有團購，從「開新團」開始。';
     }
   } catch(e){if(token===generation)notice(e.message);}
 }
 function groupForm(group) {
   const form=$('create-form');
   editingGroup=!!group;
-  form.reset();
+  form.reset();setDeadline(form,group?.deadline);
   $('products').replaceChildren();
   group?.items.forEach((item,i)=>{if(!item.inactive)addProduct(item,i);});
   if(!$('products').children.length)addProduct();
@@ -142,7 +234,13 @@ async function route() {
   clearInterval(refreshTimer); const token=++generation;
   current=null;editingEntry=null;editingGroup=false;notice();
   const hash=location.hash.slice(1);
-  $('list').hidden=!!hash;$('detail').hidden=true;$('create').hidden=true;
+  const historyList=hash==='history';
+  listSnapshot='';resultSnapshot='';setResults(false);
+  $('manage').hidden=false;$('restart-page').hidden=true;
+  $('list-title').textContent=historyList?'歷史清單':'目前的團購';
+  $('active-tab').setAttribute('aria-current',historyList?'false':'page');
+  $('history-tab').setAttribute('aria-current',historyList?'page':'false');
+  $('list').hidden=!!hash && !historyList;$('detail').hidden=true;$('create').hidden=true;
   $('new').hidden=hash==='new';$('edit-group').hidden=false;$('results').hidden=false;
   $('entry-back').hidden=true;$('paste-form').hidden=false;$('detail').classList.remove('editing');
   $('join').querySelector('h2').textContent='依品項填數量';
@@ -150,12 +248,20 @@ async function route() {
   $('send-paste').textContent='確認加入接龍';$('join').querySelector('button').textContent='加入接龍';
   window.scrollTo(0,0);
   if(hash==='new'){groupForm(null);return;}
-  const match=hash.match(/^([a-f0-9-]{36})\/(edit|entry\/([a-f0-9-]{36}))$/);
+  const match=hash.match(/^([a-f0-9-]{36})\/(edit|restart|entry\/([a-f0-9-]{36}))$/);
   if(match){
     try {
       const group=await request(api+'?id='+match[1]);
       if(token!==generation)return;
       current=group;
+      $('manage').hidden=true;
+      if(match[2]==='restart'){
+        if(group.state==='open' || group.nextId){location.replace('#'+(group.nextId || group.id));return;}
+        $('restart-title').textContent=group.title;
+        $('restart-back').href='#'+group.id;setDeadline($('restart-form'),null);
+        $('restart-page').hidden=false;return;
+      }
+      if(group.state==='history' || (match[3] && group.state!=='open')){location.replace('#'+group.id);return;}
       if(match[2]==='edit'){groupForm(group);return;}
       const entry=group.entries.find(e=>e.id===match[3]);
       if(!entry){location.replace('#'+group.id);return;}
@@ -174,14 +280,14 @@ async function route() {
     }catch(e){if(token===generation)notice(e.message);}
     return;
   }
-  if(hash && !/^[a-f0-9-]{36}$/.test(hash)){location.replace('#');return;}
+  if(hash && !historyList && !/^[a-f0-9-]{36}$/.test(hash)){location.replace('#');return;}
   void refresh(true);
   refreshTimer=setInterval(()=>{if(!document.hidden)void refresh();},5000);
 }
 $('create-form').onsubmit=async event=>{
   event.preventDefault();
   const form=event.currentTarget, button=event.submitter, token=generation;
-  const data=new FormData(form);
+  const data=new FormData(form);data.set('deadline',getDeadline(form) ?? '');
   if(data.get('menu')?.size>8*1024*1024){notice('菜單上限為 8 MB');return;}
   const rows=[...$('products').children].filter(row=>row.querySelector('[name=product]').value.trim() || row.querySelector('[name=price]').value);
   if(rows.some(row=>!row.querySelector('[name=product]').value.trim() || row.querySelector('[name=price]').value==='')){notice('預設品項請同時填入品名和單價');return;}
@@ -238,12 +344,32 @@ $('paste-form').onsubmit=async event=>{
     pasteId=crypto.randomUUID(); input.value=''; notice('已加入接龍'); await refresh();
   } catch(e){notice(e.message);} finally{input.readOnly=false;previewPaste();}
 };
+async function changeRound(action,button,deadline=null) {
+  const group=current, token=generation;
+  button.disabled=true;
+  try {
+    const result=await request(api,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({group:group.id,revision:group.revision,action,deadline})});
+    if(token!==generation)return;
+    if(action==='restart')location.replace('#'+result.id);
+    else if(action==='archive')location.hash='history';
+    else {await refresh();notice('本團已截單');}
+  } catch(e){notice(e.message);} finally {button.disabled=false;}
+}
+$('close-round').onclick=e=>{if(confirm('立即截單？截單後將停止接受接龍。'))void changeRound('close',e.currentTarget);};
+$('archive-round').onclick=e=>void changeRound('archive',e.currentTarget);
+$('restart-form').onsubmit=e=>{e.preventDefault();void changeRound('restart',e.submitter,getDeadline(e.currentTarget));};
 $('copy').onclick=async()=>{
-  try {await navigator.clipboard.writeText(formatChain(current));notice('已複製接龍，可以貼到 LINE');}
+  const text=summaryMode?[current.title,...summaryLines(current),$('stats').textContent].join('\n'):formatChain(current);
+  try {
+    await navigator.clipboard.writeText(text);
+    const button=$('copy');button.textContent='已複製';
+    setTimeout(()=>{if(button.textContent==='已複製')button.textContent=summaryMode?'複製整理':'複製接龍';},1500);
+    notice(summaryMode?'已複製品項整理':'已複製接龍，可以貼到 LINE');
+  }
   catch {
     const copy=document.createElement('textarea');
-    copy.readOnly=true;copy.value=formatChain(current);
-    copy.setAttribute('aria-label','接龍文字');$('chain').replaceChildren(copy);
+    copy.readOnly=true;copy.value=text;
+    copy.setAttribute('aria-label','接龍文字');$(summaryMode?'summary':'chain').replaceChildren(copy);
     copy.focus();copy.select();notice('已選取接龍文字，請按複製');
     clearInterval(refreshTimer);
     copy.addEventListener('blur',()=>{if(copy.isConnected)route();},{once:true});
