@@ -1,3 +1,4 @@
+import {summarizeGroup,splitOrderedItem} from './order-summary.js';
 import {setMenu} from './menu-preview.js';
 import {parseOrder,formatOrder} from './paste-order.js';
 const $ = id => document.getElementById(id);
@@ -42,17 +43,26 @@ function getDeadline(form) {
   return f.endDate.value ? Date.parse(f.endDate.value+'T'+f.endHour.value+':'+f.endMinute.value+':00+08:00')/1000 : null;
 }
 function summaryLines(group) {
-  const catalog=new Map(), pasted=new Map();
-  function add(map,name,count,amount) {
-    const row=map.get(name)||{count:0,amount:0};
-    row.count+=count;row.amount+=amount;map.set(name,row);
+  return summarizeGroup(group).rows.map(row=>
+    row.name+' × '+row.count+'　'+formatMoney.format(row.amount)+' 元');
+}
+const formatMoney = new Intl.NumberFormat('zh-TW');
+function showReceipt(group,summary) {
+  $('receipt-title').textContent=group.title;
+  const rows=summary.rows.map(item=>{
+    const tr=document.createElement('tr');
+    const name=node('th',item.name);
+    name.scope='row';
+    tr.append(name,node('td','$'+formatMoney.format(item.amount)),
+      node('td',String(item.count)));
+    return tr;
+  });
+  if(!rows.length){
+    const tr=document.createElement('tr'),cell=node('td','目前沒有接龍。');
+    cell.colSpan=3;cell.className='empty';tr.append(cell);rows.push(tr);
   }
-  for(const e of group.entries){
-    if(e.pasted) e.pasted.items.forEach(i=>add(pasted,i.name,1,i.price));
-    else e.quantities.forEach((q,i)=>{if(q)add(catalog,group.items[i].name,q,q*group.items[i].price);});
-  }
-  return [...catalog].map(([name,r])=>name+' × '+r.count+'　'+r.amount+' 元')
-    .concat([...pasted].map(([name,r])=>name+' · '+r.count+' 筆明細　'+r.amount+' 元'));
+  $('receipt-lines').replaceChildren(...rows);
+  $('receipt-total').textContent='NT$ '+formatMoney.format(summary.amount);
 }
 function setResults(summary) {
   summaryMode=summary;
@@ -188,14 +198,12 @@ function showGroup(group,first) {
   }
   $('join').hidden=!group.items.some(p=>!p.inactive);
 
-  const count=group.entries.reduce((s,e)=>s+(e.pasted ? e.pasted.items.length : e.quantities.reduce((a,b)=>a+b,0)),0);
-  const amount=group.entries.reduce((s,e)=>s+(e.pasted ? e.pasted.total : e.quantities.reduce((a,q,i)=>a+q*group.items[i].price,0)),0);
-  $('stats').textContent=group.entries.length+' 筆接龍 · '+count+' 件 · 共 '+amount+' 元';
   const snapshot=JSON.stringify([group.id,group.revision,group.state,group.entries]);
   if(snapshot===resultSnapshot)return;
   resultSnapshot=snapshot;
-  $('summary').replaceChildren(...summaryLines(group).map(line=>{const p=node('p',line);p.className='summary-line';return p;}));
-  if(!group.entries.length)$('summary').textContent='目前沒有接龍。';
+  const summary=summarizeGroup(group);
+  $('stats').textContent=group.entries.length+' 筆接龍 · '+summary.count+' 件 · 共 '+formatMoney.format(summary.amount)+' 元';
+  showReceipt(group,summary);
   $('chain').replaceChildren(node('pre',headingText(group)),...group.entries.map(e=>{
     const row=node('div',''),link=node('a','修改');
     row.className='entry';link.dataset.edit='';link.href='#'+group.id+'/entry/'+e.id;
@@ -278,7 +286,7 @@ async function route() {
   $('entry-back').hidden=true;$('paste-form').hidden=false;$('detail').classList.remove('editing');
   $('join').querySelector('h2').textContent='依品項填數量';
   $('paste-form').querySelector('h2').textContent='整段貼上訂單';
-  $('send-paste').textContent='確認加入接龍';$('submit-quantity').textContent='加入接龍';
+  $('send-paste').textContent='送出接龍';$('submit-quantity').textContent='送出接龍';
   window.scrollTo(0,0);
   if(hash==='new'){groupForm(null);return;}
   const match=hash.match(/^([a-f0-9-]{36})\/(edit|restart|entry\/([a-f0-9-]{36}))$/);
@@ -360,7 +368,8 @@ function previewPaste() {
   if(!text)return;
   try {
     const order=parseOrder(text);
-    $('preview').textContent=order.name+' · '+order.items.length+' 項 · NT$ '+order.total.toLocaleString('zh-TW');
+    const count=order.items.reduce((sum,item)=>sum+splitOrderedItem(item.name).quantity,0);
+    $('preview').textContent=order.name+' · '+count+' 件 · NT$ '+order.total.toLocaleString('zh-TW');
     $('send-paste').disabled=false;
   } catch(e){$('preview').textContent=e.message;}
 }
@@ -402,10 +411,9 @@ $('copy').onclick=async()=>{
   catch {
     const copy=document.createElement('textarea');
     copy.readOnly=true;copy.value=text;
-    copy.setAttribute('aria-label','接龍文字');$(summaryMode?'summary':'chain').replaceChildren(copy);
+    copy.setAttribute('aria-label','接龍文字');$('results').append(copy);
     copy.focus();copy.select();notice('已選取接龍文字，請按複製');
-    clearInterval(refreshTimer);
-    copy.addEventListener('blur',()=>{if(copy.isConnected)route();},{once:true});
+    copy.addEventListener('blur',()=>copy.remove(),{once:true});
   }
 };
 window.addEventListener('hashchange',route);
