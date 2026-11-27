@@ -1,3 +1,4 @@
+import {setMenu} from './menu-preview.js';
 import {parseOrder,formatOrder} from './paste-order.js';
 const $ = id => document.getElementById(id);
 const api = location.hostname === 'graceyiyo-cloud.github.io'
@@ -62,10 +63,8 @@ function showGroup(group,first) {
   current=group;
   $('title').textContent=group.title;
   $('notes').textContent=group.notes;
-  $('menu').hidden=!group.menu;
-  $('menu').href=api+'?id='+group.id+'&menu=1';
+  setMenu(group.menu ? api+'?id='+group.id+'&menu=1&v='+group.revision : '');
   $('edit-group').href='#'+group.id+'/edit';
-  $('menu').href+='&v='+group.revision;
   if(first) {
     pasteId=crypto.randomUUID();
     $('paste-form').reset(); previewPaste();
@@ -139,6 +138,7 @@ document.addEventListener('click',e=>{
   }
 });
 async function route() {
+  setMenu('');
   clearInterval(refreshTimer); const token=++generation;
   current=null;editingEntry=null;editingGroup=false;notice();
   const hash=location.hash.slice(1);
