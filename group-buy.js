@@ -1,3 +1,4 @@
+import {parseOrder,formatOrder} from './paste-order.js';
 const $ = id => document.getElementById(id);
 const api = location.hostname === 'graceyiyo-cloud.github.io'
   ? 'https://yi-qi-dian-can.graceyiyo.chatgpt.site/api/groups' : '/api/groups';
@@ -24,12 +25,13 @@ function addProduct() {
   const remove=node('button','移除');
   remove.type='button';
   remove.onclick=()=>{if($('products').children.length>1)row.remove();};
-  row.append(field('品名',{name:'product',required:true,maxLength:80}),field('單價（元）',{name:'price',type:'number',min:'0',max:'99999',step:'1',required:true}),remove);
+  row.append(field('品名',{name:'product',maxLength:80}),field('單價（元）',{name:'price',type:'number',min:'0',max:'99999',step:'1'}),remove);
   $('products').append(row);
 }
 $('add').onclick=()=>{if($('products').children.length<60)addProduct();};
 function formatChain(group) {
   const blocks=group.entries.map(e=>{
+    if(e.pasted)return formatOrder(e.pasted);
     const total=e.quantities.reduce((sum,q,i)=>sum+q*group.items[i].price,0);
     return [e.name+' '+total+'元',...group.items.flatMap((item,i)=>e.quantities[i]?[item.name+' +'+e.quantities[i]]:[])].join('\n');
   });
@@ -47,6 +49,9 @@ function showGroup(group,first) {
   $('menu').hidden=!group.menu;
   $('menu').href=api+'?id='+group.id+'&menu=1';
   if(first) {
+    pasteId=crypto.randomUUID();
+    $('paste-form').reset(); previewPaste();
+    $('join').hidden=!group.items.length;
     entryId=crypto.randomUUID();
     $('join').reset();
     $('join').elements.name.value=localStorage.getItem('group-buy-name')||'';
@@ -57,8 +62,8 @@ function showGroup(group,first) {
     }));
     totals();
   }
-  const count=group.entries.reduce((s,e)=>s+e.quantities.reduce((a,b)=>a+b,0),0);
-  const amount=group.entries.reduce((s,e)=>s+e.quantities.reduce((a,q,i)=>a+q*group.items[i].price,0),0);
+  const count=group.entries.reduce((s,e)=>s+(e.pasted ? e.pasted.items.length : e.quantities.reduce((a,b)=>a+b,0)),0);
+  const amount=group.entries.reduce((s,e)=>s+(e.pasted ? e.pasted.total : e.quantities.reduce((a,q,i)=>a+q*group.items[i].price,0)),0);
   $('stats').textContent=group.entries.length+' 筆接龍 · '+count+' 件 · 共 '+amount+' 元';
   $('chain').textContent=formatChain(group);
 }
@@ -95,7 +100,9 @@ $('create-form').onsubmit=async event=>{
   const form=event.currentTarget, button=event.submitter, token=generation;
   const data=new FormData(form);
   if(data.get('menu')?.size>8*1024*1024){notice('菜單上限為 8 MB');return;}
-  const items=[...$('products').children].map(row=>({name:row.querySelector('[name=product]').value.trim(),price:Number(row.querySelector('[name=price]').value)}));
+  const rows=[...$('products').children].filter(row=>row.querySelector('[name=product]').value.trim() || row.querySelector('[name=price]').value);
+  if(rows.some(row=>!row.querySelector('[name=product]').value.trim() || row.querySelector('[name=price]').value==='')){notice('預設品項請同時填入品名和單價');return;}
+  const items=rows.map(row=>({name:row.querySelector('[name=product]').value.trim(),price:Number(row.querySelector('[name=price]').value)}));
   data.delete('product'); data.delete('price'); data.set('items',JSON.stringify(items));
   button.disabled=true;
   try {
@@ -115,6 +122,30 @@ $('join').onsubmit=async event=>{
     entryId=crypto.randomUUID(); localStorage.setItem('group-buy-name',name);
     $('choices').querySelectorAll('input').forEach(i=>i.value=''); totals(); notice('已加入接龍'); await refresh();
   } catch(e){notice(e.message);} finally{button.disabled=false;}
+};
+let pasteId;
+function previewPaste() {
+  const text=$('paste').value.trim();
+  $('send-paste').disabled=true;
+  $('preview').textContent='';
+  if(!text)return;
+  try {
+    const order=parseOrder(text);
+    $('preview').textContent=order.name+' · '+order.items.length+' 項 · NT$ '+order.total.toLocaleString('zh-TW');
+    $('send-paste').disabled=false;
+  } catch(e){$('preview').textContent=e.message;}
+}
+$('paste').oninput=previewPaste;
+$('paste-form').onsubmit=async event=>{
+  event.preventDefault();
+  const token=generation, input=$('paste');
+  if($('send-paste').disabled)return;
+  input.readOnly=true; $('send-paste').disabled=true;
+  try {
+    await request(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:pasteId,group:current.id,text:input.value})});
+    if(token!==generation)return;
+    pasteId=crypto.randomUUID(); input.value=''; notice('已加入接龍'); await refresh();
+  } catch(e){notice(e.message);} finally{input.readOnly=false;previewPaste();}
 };
 $('copy').onclick=async()=>{
   try {await navigator.clipboard.writeText($('chain').textContent);notice('已複製接龍，可以貼到 LINE');}
